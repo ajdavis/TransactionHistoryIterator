@@ -25,12 +25,7 @@ def make_oplog_recursive(ts: int):
                 + make_oplog_recursive(ts - 1))
 
 
-@dataclass
-class Frame:
-    tree: list[OplogEntry]
-
-
-stack: list[Frame] = []
+stack: list[list[OplogEntry]] = []
 
 
 def make_oplog_procedural(maxTS: int):
@@ -45,23 +40,23 @@ def make_oplog_procedural(maxTS: int):
             if len(stack) == 1:
                 return
 
-            frame = stack.pop(len(stack) - 1)
-            ts = frame.tree[0].ts
-            leaf = stack[-1].tree[-1]
+            tree = stack.pop(len(stack) - 1)
+            ts = tree[0].ts
+            leaf = stack[-1][-1]
             if leaf.op == "importOplog" and not leaf.ns:
                 # Use the entries accumulated so far as the imported oplog,
                 # and start descending again.
-                leaf.ns = frame.tree
+                leaf.ns = tree
                 state = "push"
             else:
-                stack[-1].tree.extend(frame.tree)
+                stack[-1].extend(tree)
 
             continue
 
         # State is "push".
         entry_type = random.choice(["entry", "omit", "importOplog"])
         if entry_type != "omit":
-            stack.append(Frame([OplogEntry(ts, entry_type)]))
+            stack.append([OplogEntry(ts, entry_type)])
 
         ts -= 1
 
@@ -80,4 +75,4 @@ def pprint_tree(tree: list[OplogEntry], indent: str = ''):
 pprint.pprint(make_oplog_recursive(5))
 
 make_oplog_procedural(5)
-pprint_tree(stack[0].tree)
+pprint_tree(stack[0])

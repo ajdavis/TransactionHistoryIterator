@@ -2,107 +2,200 @@
 
 EXTENDS Naturals, Sequences, TLC
 
-Range(n, m) == [i \in 1..(m-n+1) |-> i+n-1]
-
-SubSequences(s) == 
-  (*************************************************************************)
-  (* Sequences in the same order as the sequence s, with zero or some      *)
-  (* elements omitted.                                                     *)
-  (*************************************************************************)
-    LET n == Len(s)
-        masks == [1..n -> BOOLEAN]
-        F[i \in 0..n, mask \in masks] == 
-          IF i = 0 THEN <<>>
-                   ELSE IF mask[i] THEN Append(F[i-1, mask], s[i])
-                                   ELSE F[i-1, mask]
-     IN {result \in {F[n, m]: m \in masks}: result # <<>>}
-
-OplogEntry(ts) == [ts |-> ts]
-ImportOplogEntry(ts, oplog) == [ts |-> ts, importedOplog |-> oplog]
-
-Pow(mant, exp) ==
-    LET F[n \in 0..exp] == IF n <= 1 THEN mant ELSE mant * F[n-1]
-     IN F[exp]
-
-
 (*
-h       c       c + 2^(h-1)
-5       1       17
-4       17      25
-3       25      29
-2       29      31
-1       31      32
-*)
+--algorithm TransactionHistoryIterator {
+variables mainOplog = <<>>;
 
-Oplogs(n) ==
-  (*************************************************************************)
-  (* A set of trees of oplogs, each has max depth n.                       *)
-  (* Make all grids of height n, width 2^n, with values in {TRUE, FALSE,   *)
-  (* importOplog}. Make a tree from each grid, starting at the top where height h=n. The oplog entry at h  *)
-  (* is a regular entry, or absent, or an importOplog entry depending on   *)
-  (* the value at grid row h. Set the current grid column c to 1 for the tree root, and at  *)
-  (* each branch the imported      *)
-  (* oplog uses column c + 2^(h-1). *) 
-  (*************************************************************************)
-  LET width == Pow(2, n)
-      grids == [{<<x,y>>: x \in 1..n, y \in 1..width} -> {"entry", "omit", "importOplog"}]
-      F[c \in 1..width, h \in 0..n, grid \in grids] == 
-        IF h = 0
-        THEN <<>>
-        ELSE
-            CASE
-                grid[c, h] = "entry" ->
-                    <<h>> \o F[c, h-1, grid]
-                    []
-                grid[c, h] = "omit" ->
-                    <<>> \o F[c, h-1, grid]
-                    []
-                grid[c, h] = "importOplog" ->
-                    <<>> \o F[c, h-1, grid]
-   IN {F[1, n, g]: g \in grids}
-
-
-(* --algorithm TransactionHistoryIterator {
+procedure makeOplog(maxTS)
+    \* localStack is a list of lists of oplog entries. Each list in localStack is a
+    \* "frame" of our stack, since Pluscal procedures don't do full recursion.
+    variables localStack = <<>>, state = "push", ts = maxTS, frame, leaf, tree;
 {
-print(Range(0, 5));
-print(Range(1, 4));
-print(Range(10, 12));
-print(SubSequences(Range(1, 3)));
-print(SubSequences(Range(10, 13)));
-print(Pow(2, 3));
-print(Pow(0, 0));
-print(Pow(3, 2));
-print(Pow(5, 1));
-print(Oplogs(1));
-print(Oplogs(2));
-print(Oplogs(3)); \* Error: Attempted to construct a set with too many elements (>1000000)
-} } *)
-\* BEGIN TRANSLATION (chksum(pcal) = "c8a606d5" /\ chksum(tla) = "b8296715")
-VARIABLE pc
+loop:
+    if (ts = 0) {
+        state := "pop";
+    };
+    
+    if (state = "pop") {
+        if (Len(localStack) = 1) {
+            done:
+            mainOplog := localStack[1];
+            return;
+        };
 
-vars == << pc >>
+        
+        pop:
+        \* List of entries that we've accumulated lower down the tree.        
+        tree := localStack[Len(localStack)];
+        \* Pop the stack
+        localStack := SubSeq(localStack, 1, Len(localStack)-1);
+        \* List of entries at our current stack frame.
+        frame := localStack[Len(localStack)];
+        \* Final entry of current frame.
+        leaf := frame[Len(frame)];
+        \* The timestamp at the current level of the tree.
+        ts := tree[1].ts;
+        
+        if (leaf.op = "importOplog" /\ leaf.ns = <<>>) {
+            \* Use the entries accumulated so far as the imported oplog
+            \* and start descending again.
+            state := "push";
+            importOplog:
+            localStack :=
+                SubSeq(localStack, 1, Len(localStack)-1) 
+                \o <<[ts |-> frame[Len(frame)].ts,
+                      op |-> "importOplog",
+                      ns |-> tree]>>;
+        };
+        
+        appendEntries:
+        if (leaf.op # "importOplog" \/ leaf.ns # <<>>) {
+            \* Append tree to current frame's list of entries.
+            localStack :=
+                SubSeq(localStack, 1, Len(localStack)-1)
+                \o  
+                <<frame \o tree>>;
+        };
+        
+        goto loop;
+    };
+    
+    push:
+    \*either {
+        \* Add regular "insert" oplog entry (op="i") to the stack.
+        localStack := localStack \o <<<<[ts |-> ts, op |-> "i"]>>>>;
 
-Init == /\ pc = "Lbl_1"
+    ts := ts - 1;
+    
+    goto loop;
+}
+  
+{ 
+    main:
+    call makeOplog(5);
+    madeOplog:
+    print(mainOplog);
+}
+}
+*)
+\* BEGIN TRANSLATION (chksum(pcal) = "cf02536e" /\ chksum(tla) = "4c5ed73f")
+CONSTANT defaultInitValue
+VARIABLES mainOplog, pc, stack, maxTS, localStack, state, ts, frame, leaf, 
+          tree
 
-Lbl_1 == /\ pc = "Lbl_1"
-         /\ PrintT((Range(0, 5)))
-         /\ PrintT((Range(1, 4)))
-         /\ PrintT((Range(10, 12)))
-         /\ PrintT((SubSequences(Range(1, 3))))
-         /\ PrintT((SubSequences(Range(10, 13))))
-         /\ PrintT((Pow(2, 3)))
-         /\ PrintT((Pow(0, 0)))
-         /\ PrintT((Pow(3, 2)))
-         /\ PrintT((Pow(5, 1)))
-         /\ PrintT((Oplogs(1)))
-         /\ PrintT((Oplogs(2)))
-         /\ PrintT((Oplogs(3)))
-         /\ pc' = "Done"
+vars == << mainOplog, pc, stack, maxTS, localStack, state, ts, frame, leaf, 
+           tree >>
+
+Init == (* Global variables *)
+        /\ mainOplog = <<>>
+        (* Procedure makeOplog *)
+        /\ maxTS = defaultInitValue
+        /\ localStack = <<>>
+        /\ state = "push"
+        /\ ts = maxTS
+        /\ frame = defaultInitValue
+        /\ leaf = defaultInitValue
+        /\ tree = defaultInitValue
+        /\ stack = << >>
+        /\ pc = "main"
+
+loop == /\ pc = "loop"
+        /\ IF ts = 0
+              THEN /\ state' = "pop"
+              ELSE /\ TRUE
+                   /\ state' = state
+        /\ IF state' = "pop"
+              THEN /\ IF Len(localStack) = 1
+                         THEN /\ pc' = "done"
+                         ELSE /\ pc' = "pop"
+              ELSE /\ pc' = "push"
+        /\ UNCHANGED << mainOplog, stack, maxTS, localStack, ts, frame, leaf, 
+                        tree >>
+
+pop == /\ pc = "pop"
+       /\ tree' = localStack[Len(localStack)]
+       /\ localStack' = SubSeq(localStack, 1, Len(localStack)-1)
+       /\ frame' = localStack'[Len(localStack')]
+       /\ leaf' = frame'[Len(frame')]
+       /\ ts' = tree'[1].ts
+       /\ IF leaf'.op = "importOplog" /\ leaf'.ns = <<>>
+             THEN /\ state' = "push"
+                  /\ pc' = "importOplog"
+             ELSE /\ pc' = "appendEntries"
+                  /\ state' = state
+       /\ UNCHANGED << mainOplog, stack, maxTS >>
+
+importOplog == /\ pc = "importOplog"
+               /\ localStack' = SubSeq(localStack, 1, Len(localStack)-1)
+                                \o <<[ts |-> frame[Len(frame)].ts,
+                                      op |-> "importOplog",
+                                      ns |-> tree]>>
+               /\ pc' = "appendEntries"
+               /\ UNCHANGED << mainOplog, stack, maxTS, state, ts, frame, leaf, 
+                               tree >>
+
+appendEntries == /\ pc = "appendEntries"
+                 /\ IF leaf.op # "importOplog" \/ leaf.ns # <<>>
+                       THEN /\ localStack' = SubSeq(localStack, 1, Len(localStack)-1)
+                                             \o
+                                             <<frame \o tree>>
+                       ELSE /\ TRUE
+                            /\ UNCHANGED localStack
+                 /\ pc' = "loop"
+                 /\ UNCHANGED << mainOplog, stack, maxTS, state, ts, frame, 
+                                 leaf, tree >>
+
+done == /\ pc = "done"
+        /\ mainOplog' = localStack[1]
+        /\ pc' = Head(stack).pc
+        /\ localStack' = Head(stack).localStack
+        /\ state' = Head(stack).state
+        /\ ts' = Head(stack).ts
+        /\ frame' = Head(stack).frame
+        /\ leaf' = Head(stack).leaf
+        /\ tree' = Head(stack).tree
+        /\ maxTS' = Head(stack).maxTS
+        /\ stack' = Tail(stack)
+
+push == /\ pc = "push"
+        /\ localStack' = localStack \o <<<<[ts |-> ts, op |-> "i"]>>>>
+        /\ ts' = ts - 1
+        /\ pc' = "loop"
+        /\ UNCHANGED << mainOplog, stack, maxTS, state, frame, leaf, tree >>
+
+makeOplog == loop \/ pop \/ importOplog \/ appendEntries \/ done \/ push
+
+main == /\ pc = "main"
+        /\ /\ maxTS' = 5
+           /\ stack' = << [ procedure |->  "makeOplog",
+                            pc        |->  "madeOplog",
+                            localStack |->  localStack,
+                            state     |->  state,
+                            ts        |->  ts,
+                            frame     |->  frame,
+                            leaf      |->  leaf,
+                            tree      |->  tree,
+                            maxTS     |->  maxTS ] >>
+                        \o stack
+        /\ localStack' = <<>>
+        /\ state' = "push"
+        /\ ts' = maxTS'
+        /\ frame' = defaultInitValue
+        /\ leaf' = defaultInitValue
+        /\ tree' = defaultInitValue
+        /\ pc' = "loop"
+        /\ UNCHANGED mainOplog
+
+madeOplog == /\ pc = "madeOplog"
+             /\ PrintT((mainOplog))
+             /\ pc' = "Done"
+             /\ UNCHANGED << mainOplog, stack, maxTS, localStack, state, ts, 
+                             frame, leaf, tree >>
 
 (* Allow infinite stuttering to prevent deadlock on termination. *)
 Terminating == pc = "Done" /\ UNCHANGED vars
 
-Next == Lbl_1
+Next == makeOplog \/ main \/ madeOplog
            \/ Terminating
 
 Spec == Init /\ [][Next]_vars
@@ -113,5 +206,5 @@ Termination == <>(pc = "Done")
 
 =============================================================================
 \* Modification History
-\* Last modified Fri Sep 17 10:44:59 EDT 2021 by emptysquare
+\* Last modified Fri Sep 17 16:41:19 EDT 2021 by emptysquare
 \* Created Thu Sep 16 13:06:35 EDT 2021 by emptysquare

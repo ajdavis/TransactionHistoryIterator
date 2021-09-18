@@ -43,9 +43,9 @@ loop:
             importOplog:
             localStack :=
                 SubSeq(localStack, 1, Len(localStack)-1) 
-                \o <<[ts |-> frame[Len(frame)].ts,
-                      op |-> "importOplog",
-                      ns |-> tree]>>;
+                \o <<<<[ts |-> frame[Len(frame)].ts,
+                        op |-> "importOplog",
+                        ns |-> tree]>>>>;
         };
         
         appendEntries:
@@ -61,10 +61,18 @@ loop:
     };
     
     push:
-    \*either {
+    either {
         \* Add regular "insert" oplog entry (op="i") to the stack.
         localStack := localStack \o <<<<[ts |-> ts, op |-> "i"]>>>>;
+    } or {
+        \* Add importOplog entry.
+        localStack := localStack \o <<<<[ts |-> ts, op |-> "importOplog", ns |-> <<>>]>>>>;
+    } or {
+        \* No entry at this timestamp.
+        skip;
+    };        
 
+    descend:
     ts := ts - 1;
     
     goto loop;
@@ -72,13 +80,13 @@ loop:
   
 { 
     main:
-    call makeOplog(5);
+    call makeOplog(3);
     madeOplog:
     print(mainOplog);
 }
 }
 *)
-\* BEGIN TRANSLATION (chksum(pcal) = "cf02536e" /\ chksum(tla) = "4c5ed73f")
+\* BEGIN TRANSLATION (chksum(pcal) = "64b76686" /\ chksum(tla) = "db59b53d")
 CONSTANT defaultInitValue
 VARIABLES mainOplog, pc, stack, maxTS, localStack, state, ts, frame, leaf, 
           tree
@@ -127,9 +135,9 @@ pop == /\ pc = "pop"
 
 importOplog == /\ pc = "importOplog"
                /\ localStack' = SubSeq(localStack, 1, Len(localStack)-1)
-                                \o <<[ts |-> frame[Len(frame)].ts,
-                                      op |-> "importOplog",
-                                      ns |-> tree]>>
+                                \o <<<<[ts |-> frame[Len(frame)].ts,
+                                        op |-> "importOplog",
+                                        ns |-> tree]>>>>
                /\ pc' = "appendEntries"
                /\ UNCHANGED << mainOplog, stack, maxTS, state, ts, frame, leaf, 
                                tree >>
@@ -158,15 +166,24 @@ done == /\ pc = "done"
         /\ stack' = Tail(stack)
 
 push == /\ pc = "push"
-        /\ localStack' = localStack \o <<<<[ts |-> ts, op |-> "i"]>>>>
-        /\ ts' = ts - 1
-        /\ pc' = "loop"
-        /\ UNCHANGED << mainOplog, stack, maxTS, state, frame, leaf, tree >>
+        /\ \/ /\ localStack' = localStack \o <<<<[ts |-> ts, op |-> "i"]>>>>
+           \/ /\ localStack' = localStack \o <<<<[ts |-> ts, op |-> "importOplog", ns |-> <<>>]>>>>
+           \/ /\ TRUE
+              /\ UNCHANGED localStack
+        /\ pc' = "descend"
+        /\ UNCHANGED << mainOplog, stack, maxTS, state, ts, frame, leaf, tree >>
+
+descend == /\ pc = "descend"
+           /\ ts' = ts - 1
+           /\ pc' = "loop"
+           /\ UNCHANGED << mainOplog, stack, maxTS, localStack, state, frame, 
+                           leaf, tree >>
 
 makeOplog == loop \/ pop \/ importOplog \/ appendEntries \/ done \/ push
+                \/ descend
 
 main == /\ pc = "main"
-        /\ /\ maxTS' = 5
+        /\ /\ maxTS' = 3
            /\ stack' = << [ procedure |->  "makeOplog",
                             pc        |->  "madeOplog",
                             localStack |->  localStack,
@@ -206,5 +223,5 @@ Termination == <>(pc = "Done")
 
 =============================================================================
 \* Modification History
-\* Last modified Fri Sep 17 16:41:19 EDT 2021 by emptysquare
+\* Last modified Fri Sep 17 22:53:47 EDT 2021 by emptysquare
 \* Created Thu Sep 16 13:06:35 EDT 2021 by emptysquare

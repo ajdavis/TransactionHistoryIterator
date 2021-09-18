@@ -4,7 +4,37 @@ EXTENDS Naturals, Sequences, TLC
 
 (*
 --algorithm TransactionHistoryIterator {
-variables mainOplog = <<>>;
+(*
+mainOplog is the Merge Recipient's oplog tree.
+retryableWriteTimestamp is the timestamp of a regular oplog entry (not an
+importOplog entry) that the TransactionHistoryIterator wants to find in
+the tree.
+*) 
+variables mainOplog = <<>>, retryableWriteTimestamp;
+
+(*
+Make an oplog tree, e.g.:
+
+<<
+  [ts |-> 3, op |-> "importOplog", ns |->
+    <<
+      [ts |-> 1, op |-> "importOplog", ns |-> <<>>]
+    >>
+  ],
+  [ts |-> 1, op |-> "i"]
+>>
+
+Each entry has a "ts" (timestamp) value. Each is a regular insert (op="i") or
+an importOplog entry. If the latter, there is an "ns" field which is a list of
+oplog entries, i.e. an imported oplog that branches off its parent. The tree
+is ordered with the highest timestamps on top. 
+
+It's natural to express the set of all oplog trees of height H in TLA+, but
+TLC complains "Attempted to construct a set with too many elements (>1000000)."
+So we have to construct one tree at a time. I've chosen to do this in PlusCal,
+but PlusCal doesn't do recursive functions with return values, so I had to
+write an explicit stack-based procedure.
+*)
 
 procedure makeOplog(maxTS)
     \* localStack is a list of lists of oplog entries. Each list in localStack is a
@@ -64,6 +94,12 @@ loop:
     either {
         \* Add regular "insert" oplog entry (op="i") to the stack.
         localStack := localStack \o <<<<[ts |-> ts, op |-> "i"]>>>>;
+        either {
+            \* Maybe this is the entry that TransactionHistoryIterator wants.
+            retryableWriteTimestamp := ts;
+        } or {
+            skip;
+        }
     } or {
         \* Add importOplog entry.
         localStack := localStack \o <<<<[ts |-> ts, op |-> "importOplog", ns |-> <<>>]>>>>;
@@ -77,6 +113,13 @@ loop:
     
     goto loop;
 }
+
+procedure TransactionHistoryIterator_next(nextOpTime)
+    variables nextOplog = mainOplog, nextImport, nextOpTime;
+{
+    \* last importOplog entry with ts > _nextOpTime in _nextOplog
+    nextImport := CHOOSE entry \in nextOplog: entry.ts > 
+}
   
 { 
     main:
@@ -86,7 +129,7 @@ loop:
 }
 }
 *)
-\* BEGIN TRANSLATION (chksum(pcal) = "64b76686" /\ chksum(tla) = "db59b53d")
+\* BEGIN TRANSLATION (chksum(pcal) = "5691a855" /\ chksum(tla) = "4167063a")
 CONSTANT defaultInitValue
 VARIABLES mainOplog, pc, stack, maxTS, localStack, state, ts, frame, leaf, 
           tree
@@ -185,7 +228,7 @@ makeOplog == loop \/ pop \/ importOplog \/ appendEntries \/ done \/ push
 main == /\ pc = "main"
         /\ /\ maxTS' = 3
            /\ stack' = << [ procedure |->  "makeOplog",
-                            pc        |->  "madeOplog",
+                            pc        |->  "Done",
                             localStack |->  localStack,
                             state     |->  state,
                             ts        |->  ts,
@@ -203,16 +246,10 @@ main == /\ pc = "main"
         /\ pc' = "loop"
         /\ UNCHANGED mainOplog
 
-madeOplog == /\ pc = "madeOplog"
-             /\ PrintT((mainOplog))
-             /\ pc' = "Done"
-             /\ UNCHANGED << mainOplog, stack, maxTS, localStack, state, ts, 
-                             frame, leaf, tree >>
-
 (* Allow infinite stuttering to prevent deadlock on termination. *)
 Terminating == pc = "Done" /\ UNCHANGED vars
 
-Next == makeOplog \/ main \/ madeOplog
+Next == makeOplog \/ main
            \/ Terminating
 
 Spec == Init /\ [][Next]_vars
@@ -223,5 +260,5 @@ Termination == <>(pc = "Done")
 
 =============================================================================
 \* Modification History
-\* Last modified Fri Sep 17 22:53:47 EDT 2021 by emptysquare
+\* Last modified Sat Sep 18 08:01:53 EDT 2021 by emptysquare
 \* Created Thu Sep 16 13:06:35 EDT 2021 by emptysquare
